@@ -1,0 +1,254 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    // NOTE: When using mysql or sqlserver, uncomment the @db.Text annotations in model Account below
+    // Further reading:
+    // https://next-auth.js.org/adapters/prisma#create-the-prisma-schema
+    // https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#string
+    url      = env("DATABASE_URL")
+}
+
+enum Role {
+    ADMIN
+    PHOTOGRAPHER
+    CLIENT
+}
+
+// Necessary for Next auth
+model Account {
+    id                       String  @id @default(cuid())
+    userId                   String
+    type                     String
+    provider                 String
+    providerAccountId        String
+    refresh_token            String? // @db.Text
+    access_token             String? // @db.Text
+    expires_at               Int?
+    token_type               String?
+    scope                    String?
+    id_token                 String? // @db.Text
+    session_state            String?
+    user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    refresh_token_expires_in Int?
+
+    @@unique([provider, providerAccountId])
+}
+
+model Session {
+    id           String   @id @default(cuid())
+    sessionToken String   @unique
+    userId       String
+    expires      DateTime
+    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Modelo de usuario extendido
+model User {
+    id            String    @id @default(cuid())
+    name          String? // Nombre del usuario
+    email         String?   @unique // Email único
+    emailVerified DateTime? // Verificación de email
+    image         String? // Avatar
+
+    role          Role      @default(PHOTOGRAPHER)
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+
+    // Relaciones con otros modelos
+    accounts   Account[]
+    sessions   Session[]
+    galeries   Gallery[] // Galerías que posee
+    selections Selection[] // Sus selecciones
+    comments   Comment[] // Sus comentarios
+    activities Activity[] // Su registro de actividad
+}
+
+model VerificationToken {
+    identifier String
+    token      String   @unique
+    expires    DateTime
+
+    @@unique([identifier, token])
+}
+
+// Define los estados posibles de una galería
+enum GalleryStatus {
+    DRAFT // Galería en construcción
+    PUBLISHED // Galería visible para clientes
+    ARCHIVED // Galería archivada/inactiva
+}
+
+// Estados del proceso de selección de fotos
+enum SelectionStatus {
+    PENDING // No iniciada
+    IN_PROGRESS // Cliente está seleccionando
+    COMPLETED // Cliente terminó su selección
+    APPROVED // Fotógrafo aprobó la selección
+}
+
+// Tipos de fotos en el sistema
+enum PhotoType {
+    ORIGINAL // Foto original sin editar
+    EDITED // Foto editada/retocada
+    PROOF // Foto de prueba/marca de agua
+}
+
+// Modelo principal para las galerías fotográficas
+model Gallery {
+    id          String  @id @default(cuid())
+    name        String // Nombre de la galería
+    slug        String  @unique // URL amigable
+    description String? // Descripción opcional
+    thumbnail   String? // Imagen de portada
+
+    // Configuración de seguridad y acceso
+    isPrivate Boolean       @default(true) // Si es visible públicamente
+    status    GalleryStatus @default(DRAFT)
+    password  String? // Contraseña opcional
+    code      String? // Código único para compartir
+
+    // Información del evento/sesión
+    clientName  String? // Nombre del cliente
+    clientEmail String?
+
+    eventDate DateTime? // Fecha del evento fotografiado
+    eventType String? // Tipo de evento (boda, familiar, etc.)
+    location  String? // Lugar del evento
+
+    // Configuración de selección de fotos
+    maxSelections  Int? // Límite máximo de fotos a elegir
+    minSelections  Int? // Mínimo de fotos requeridas
+    expiresAt      DateTime? // Fecha de caducidad
+    lastAccessedAt DateTime? // Último acceso
+    viewCount      Int       @default(0) // Contador de visitas
+
+    // Campo para notas y comunicación
+    clientNotes       String? @db.Text // Notas del cliente
+    photographerNotes String? @db.Text // Notas privadas del fotógrafo
+
+    // Relaciones con otros modelos
+    owner      User        @relation(fields: [ownerId], references: [id])
+    ownerId    String // ID del fotógrafo/dueño
+    photos     Photo[] // Fotos en la galería
+    selections Selection[] // Selecciones realizadas
+    comments   Comment[] // Comentarios en la galería
+    activities Activity[] // Registro de actividades
+
+    // Campos de auditoría
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+// Modelo para cada foto individual
+model Photo {
+    id        String    @id @default(cuid())
+    filename  String // Nombre del archivo
+    url       String // URL de la imagen
+    thumbnail String? // URL de la miniatura
+    type      PhotoType @default(ORIGINAL)
+
+    // Metadatos técnicos
+    title       String? // Título opcional
+    description String? // Descripción
+    size        Int? // Tamaño en bytes
+    width       Int? // Ancho en píxeles
+    height      Int? // Alto en píxeles
+    format      String? // Formato del archivo
+
+    // Información técnica de la foto
+    takenAt     DateTime? // Fecha/hora de captura
+    camera      String? // Modelo de cámara
+    lens        String? // Lente usado
+    focalLength String? // Distancia focal
+    iso         String? // Sensibilidad ISO
+
+    // Organización
+    sequence Int // Orden en la galería
+    tags     String[] // Etiquetas para categorización
+
+    // Relaciones
+    gallery    Gallery     @relation(fields: [galleryId], references: [id], onDelete: Cascade)
+    galleryId  String
+    selections Selection[] // Quién seleccionó esta foto
+    comments   Comment[] // Comentarios en la foto
+
+    // Campos de auditoría
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([galleryId])
+}
+
+// Modelo para gestionar las selecciones de fotos
+model Selection {
+    id     String          @id @default(cuid())
+    status SelectionStatus @default(PENDING)
+
+    // Relaciones principales
+    gallery    Gallery @relation(fields: [galleryId], references: [id])
+    galleryId  String
+    photo      Photo   @relation(fields: [photoId], references: [id])
+    photoId    String
+    selectedBy User    @relation(fields: [userId], references: [id])
+    userId     String
+
+    // Información adicional
+    notes      String?  @db.Text // Notas sobre la selección
+    selectedAt DateTime @default(now())
+
+    // Garantiza selecciones únicas
+    @@unique([galleryId, photoId, userId])
+    @@index([galleryId])
+    @@index([photoId])
+}
+
+// Modelo para comentarios en galerías y fotos
+model Comment {
+    id      String @id @default(cuid())
+    content String @db.Text // Contenido del comentario
+
+    // Relaciones
+    gallery   Gallery @relation(fields: [galleryId], references: [id])
+    galleryId String
+    photo     Photo?  @relation(fields: [photoId], references: [id])
+    photoId   String? // Opcional: comentario puede ser en galería o foto
+    author    User    @relation(fields: [authorId], references: [id])
+    authorId  String
+
+    // Sistema de comentarios anidados
+    parentId String?
+    parent   Comment?  @relation("CommentToComment", fields: [parentId], references: [id])
+    replies  Comment[] @relation("CommentToComment")
+
+    // Campos de auditoría
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([galleryId])
+    @@index([photoId])
+}
+
+// Modelo para registro de actividades
+model Activity {
+    id          String  @id @default(cuid())
+    action      String // Tipo de acción realizada
+    description String? // Descripción de la actividad
+
+    // Relaciones
+    gallery   Gallery @relation(fields: [galleryId], references: [id])
+    galleryId String
+    user      User    @relation(fields: [userId], references: [id])
+    userId    String
+
+    createdAt DateTime @default(now())
+
+    @@index([galleryId])
+    @@index([userId])
+}
